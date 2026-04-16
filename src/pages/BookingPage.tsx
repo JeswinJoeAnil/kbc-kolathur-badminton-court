@@ -109,7 +109,7 @@ export default function BookingPage({ user, profile, portalType = 'guest' }: Boo
     try {
       const tempBooking: Booking = {
         id: 'temp-' + Date.now(),
-        user_id: user?.id || null,
+        userId: user?.id ?? undefined,
         userName: userName,
         userPhone: userPhone,
         date: format(selectedDate, 'yyyy-MM-dd'),
@@ -125,14 +125,14 @@ export default function BookingPage({ user, profile, portalType = 'guest' }: Boo
       setBookings(prev => [...prev, tempBooking]);
       
       const newBooking = {
-        user_id: user?.id || null,
-        "userName": userName,
-        "userPhone": userPhone,
+        userId: user?.id || null,
+        userName: userName,
+        userPhone: userPhone,
         date: format(selectedDate, 'yyyy-MM-dd'),
-        "timeSlot": selectedSlot,
+        timeSlot: selectedSlot,
         status: 'pending',
-        "paymentStatus": 'pending',
-        "paymentMethod": 'cash',
+        paymentStatus: 'pending',
+        paymentMethod: 'cash',
         type: isMember ? 'member' : 'guest',
       };
 

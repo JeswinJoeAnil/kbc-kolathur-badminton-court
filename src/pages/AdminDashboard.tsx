@@ -4,6 +4,8 @@ import { supabase, handleFirestoreError, OperationType } from '@/lib/supabase';
 import { Booking, UserProfile, TIME_SLOTS, DEFAULT_BLOCKED_SLOTS, BlockedSlot, SLOT_BLOCK_REASONS } from '@/types';
 import { format } from 'date-fns';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
@@ -12,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { toast } from 'sonner';
 import {
   Check, X, Phone, Calendar as CalendarIcon, Clock, User as UserIcon, Trash2, Lock, Unlock,
-  LayoutDashboard, CalendarCheck, Users, Shield, Home, Crown, TrendingUp, AlertCircle
+  LayoutDashboard, CalendarCheck, Users, Shield, Home, Crown, TrendingUp, AlertCircle, Mail, ArrowRight, LogOut
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -20,6 +22,12 @@ interface AdminDashboardProps {
 }
 
 export default function AdminDashboard({ profile }: AdminDashboardProps) {
+  // Admin auth state
+  const [adminUser, setAdminUser] = useState<any>(null);
+  const [adminProfile, setAdminProfile] = useState<UserProfile | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [loginLoading, setLoginLoading] = useState(false);
+
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [blockedSlots, setBlockedSlots] = useState<BlockedSlot[]>([]);
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
@@ -28,8 +36,79 @@ export default function AdminDashboard({ profile }: AdminDashboardProps) {
   const [members, setMembers] = useState<UserProfile[]>([]);
   const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
 
-  // Fetch bookings
+  // Check if current user is admin on mount
   useEffect(() => {
+    let mounted = true;
+    const timeout = setTimeout(() => { if (mounted) setAuthLoading(false); }, 5000);
+
+    const init = async () => {
+      try {
+        const { data: { user }, error } = await supabase.auth.getUser();
+        if (error || !user) {
+          if (mounted) { setAdminUser(null); setAdminProfile(null); }
+        } else if (mounted) {
+          // Check if this user is admin
+          const { data: profileData } = await supabase.from('users').select('*').eq('uid', user.id).maybeSingle();
+          if (profileData && profileData.role === 'admin') {
+            setAdminUser(user);
+            setAdminProfile(profileData as UserProfile);
+          } else {
+            setAdminUser(null);
+            setAdminProfile(null);
+          }
+        }
+      } catch {
+        if (mounted) { setAdminUser(null); setAdminProfile(null); }
+      } finally {
+        clearTimeout(timeout);
+        if (mounted) setAuthLoading(false);
+      }
+    };
+
+    init();
+    return () => { mounted = false; clearTimeout(timeout); };
+  }, []);
+
+  const handleAdminLogin = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setLoginLoading(true);
+    const fd = new FormData(e.currentTarget);
+    const email = fd.get('email') as string;
+    const password = fd.get('password') as string;
+
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) { toast.error(error.message); return; }
+
+      // Verify admin role
+      const { data: profileData } = await supabase.from('users').select('*').eq('uid', data.user.id).maybeSingle();
+      if (!profileData || profileData.role !== 'admin') {
+        toast.error('Access denied. Admin credentials required.');
+        await supabase.auth.signOut();
+        return;
+      }
+
+      setAdminUser(data.user);
+      setAdminProfile(profileData as UserProfile);
+      toast.success('Welcome back, Admin!');
+    } catch (err: any) {
+      toast.error(err.message || 'Login failed');
+    } finally {
+      setLoginLoading(false);
+    }
+  };
+
+  const handleAdminLogout = async () => {
+    await supabase.auth.signOut();
+    setAdminUser(null);
+    setAdminProfile(null);
+    toast.success('Logged out');
+  };
+
+  // Fetch bookings (only when authed)
+  useEffect(() => {
+    if (!adminUser) return;
+
     const fetchBookings = async () => {
       const { data, error } = await supabase
         .from('bookings')
@@ -55,10 +134,11 @@ export default function AdminDashboard({ profile }: AdminDashboardProps) {
       .subscribe();
 
     return () => { subscription.unsubscribe(); };
-  }, []);
+  }, [adminUser]);
 
   // Fetch blocked slots for selected date
   useEffect(() => {
+    if (!adminUser) return;
     const dateStr = format(selectedDate, 'yyyy-MM-dd');
 
     const fetchBlockedSlots = async () => {
@@ -85,10 +165,12 @@ export default function AdminDashboard({ profile }: AdminDashboardProps) {
       .subscribe();
 
     return () => { subscription.unsubscribe(); };
-  }, [selectedDate]);
+  }, [selectedDate, adminUser]);
 
   // Fetch members/users
   useEffect(() => {
+    if (!adminUser) return;
+
     const fetchUsers = async () => {
       const { data, error } = await supabase
         .from('users')
@@ -105,7 +187,7 @@ export default function AdminDashboard({ profile }: AdminDashboardProps) {
     };
 
     fetchUsers();
-  }, []);
+  }, [adminUser]);
 
   const handleStatusUpdate = async (bookingId: string, status: 'approved' | 'denied') => {
     // Optimistic update
@@ -208,6 +290,80 @@ export default function AdminDashboard({ profile }: AdminDashboardProps) {
     }
   };
 
+  // ——— AUTH LOADING SCREEN ———
+  if (authLoading) {
+    return (
+      <div className="h-screen w-full flex items-center justify-center bg-background">
+        <div className="w-8 h-8 border-4 border-foreground/20 border-t-foreground rounded-full animate-spin"></div>
+      </div>
+    );
+  }
+
+  // ——— ADMIN LOGIN SCREEN ———
+  if (!adminUser) {
+    return (
+      <div className="portal-admin min-h-screen bg-background">
+        <nav className="sticky top-0 z-50 bg-red-500 text-white border-b-2 border-foreground px-4 py-3">
+          <div className="max-w-7xl mx-auto flex justify-between items-center">
+            <div className="text-2xl font-bold tracking-tighter flex items-center gap-2">
+              <Shield size={24} />
+              <span>Admin Portal</span>
+            </div>
+            <Link to="/" className="font-medium hover:opacity-70 transition-opacity">
+              <Home size={18} />
+            </Link>
+          </div>
+        </nav>
+
+        <div className="max-w-md mx-auto px-4 py-16 portal-fade-in">
+          <div className="text-center mb-10">
+            <div className="inline-block px-4 py-2 brutalist-border brutalist-shadow mb-6 bg-red-500 text-white">
+              <span className="text-3xl font-black tracking-tighter flex items-center gap-2">
+                <Shield size={24} /> ADMIN
+              </span>
+            </div>
+            <h1 className="text-4xl font-bold tracking-tighter mb-2">Admin Login</h1>
+            <p className="opacity-60">Authorized access only</p>
+          </div>
+
+          <form onSubmit={handleAdminLogin} className="space-y-5 p-8 brutalist-border brutalist-shadow bg-white">
+            <div className="space-y-2">
+              <Label htmlFor="email" className="font-bold text-sm uppercase tracking-wider">Email</Label>
+              <div className="relative">
+                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 opacity-40" size={18} />
+                <Input id="email" name="email" type="email" placeholder="admin@kbc.com" className="pl-10 brutalist-border h-12" required />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="password" className="font-bold text-sm uppercase tracking-wider">Password</Label>
+              <div className="relative">
+                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 opacity-40" size={18} />
+                <Input id="password" name="password" type="password" placeholder="••••••••" className="pl-10 brutalist-border h-12" required />
+              </div>
+            </div>
+
+            <Button
+              type="submit"
+              disabled={loginLoading}
+              className="w-full h-14 text-lg font-bold brutalist-border brutalist-shadow-sm bg-red-500 hover:bg-red-600 text-white"
+            >
+              {loginLoading ? 'Authenticating...' : 'Login to Admin'}
+              {!loginLoading && <ArrowRight className="ml-2" size={18} />}
+            </Button>
+          </form>
+
+          <div className="mt-6 text-center">
+            <Link to="/" className="text-sm opacity-60 hover:opacity-100 underline">
+              ← Back to main site
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ——— AUTHENTICATED ADMIN DASHBOARD ———
+
   const pendingBookings = bookings.filter(b => b.status === 'pending');
   const approvedBookings = bookings.filter(b => b.status === 'approved');
   const deniedBookings = bookings.filter(b => b.status === 'denied');
@@ -252,7 +408,10 @@ export default function AdminDashboard({ profile }: AdminDashboardProps) {
           ))}
         </div>
 
-        <div className="p-4 border-t-2 border-foreground">
+        <div className="p-4 border-t-2 border-foreground space-y-1">
+          <button onClick={handleAdminLogout} className="admin-sidebar-item w-full text-left text-sm opacity-60 hover:opacity-100 text-red-500">
+            <LogOut size={16} /> Logout
+          </button>
           <Link to="/" className="admin-sidebar-item text-sm opacity-60 hover:opacity-100">
             <Home size={16} /> Back to Site
           </Link>
@@ -281,7 +440,7 @@ export default function AdminDashboard({ profile }: AdminDashboardProps) {
         {activeTab === 'overview' && (
           <div>
             <h1 className="text-4xl md:text-5xl font-bold tracking-tighter mb-2">Dashboard</h1>
-            <p className="text-lg opacity-60 mb-10">Welcome back. Here's today's overview.</p>
+            <p className="text-lg opacity-60 mb-10">Welcome back, {adminProfile?.displayName || 'Admin'}.</p>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
               <div className="stat-card">

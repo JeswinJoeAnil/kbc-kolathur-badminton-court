@@ -18,7 +18,7 @@ export default function MemberNav({ user, profile, onLogout }: MemberNavProps) {
       <div className="max-w-7xl mx-auto flex justify-between items-center">
         <Link to="/" className="text-2xl font-bold tracking-tighter flex items-center gap-2">
           <span className="px-2 py-0.5 brutalist-border" style={{ backgroundColor: '#FBBF24' }}>KBC</span>
-          <span className="hidden sm:inline flex items-center gap-1">
+          <span className="hidden sm:inline-flex items-center gap-1">
             <Crown size={16} /> Member
           </span>
         </Link>
